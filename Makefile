@@ -7,6 +7,7 @@ all: build
 
 build:
 	cd src && \
+	go get && \
 	go build -o ../bin/$(BINARY_NAME)-$(VERSION)_$(GOOS)_$(GOARCH) -ldflags="-s -w" -trimpath *.go
 
 docker-build:
