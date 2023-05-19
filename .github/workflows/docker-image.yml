@@ -2,8 +2,8 @@ name: Docker image deploy
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+permissions:
+  packages: write
 jobs:
   build:
     runs-on: ubuntu-latest
