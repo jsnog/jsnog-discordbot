@@ -1,4 +1,4 @@
-FROM debian:11.7-slim
+FROM debian:bookworm-slim
 
 COPY bin/* /usr/local/bin/
 
