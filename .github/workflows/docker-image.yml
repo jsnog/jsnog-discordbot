@@ -11,9 +11,9 @@ jobs:
     - uses: actions/checkout@v3
 
     - uses: actions/setup-go@v4
-    - name: build project
+
+    - name: Build project
       run: | 
-        apt update && apt install make
         make build
 
     - name: Set up Docker Buildx
