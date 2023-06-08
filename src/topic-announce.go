@@ -1,18 +1,31 @@
 package main
 
 import (
-	"github.com/bwmarrin/discordgo"
 	"log"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
+)
+
+const (
+	prefix = "!jsnog-bot"
 )
 
 func announceTopic(discord *discordgo.Session, guild string) {
 	// 1時間
-	t := time.NewTicker(2 * time.Hour)
-	defer t.Stop()
+	var t time.Duration
+	if *debug == true {
+		t = 10 * time.Second
+	} else {
+		t = 1 * time.Hour
+	}
+	timer := time.NewTicker(t)
+	defer timer.Stop()
 	for {
 		select {
-		case <-t.C:
+		case <-timer.C:
 			//Every 2 hour
 			log.Print("announceTopic")
 			channels, err := discord.GuildChannels(guild)
@@ -20,43 +33,69 @@ func announceTopic(discord *discordgo.Session, guild string) {
 				log.Printf("Error getting GuildChannels: %s", err)
 				break
 			}
-			sendChannels := make([]*discordgo.Channel, 0)
 			// 全チャンネルのトピックを取得
+			var topic string
 			for _, c := range channels {
-				// テキストチャンネル以外は無視
-				if c.Type != discordgo.ChannelTypeGuildText {
-					continue
-				}
 				// トピックがないチャンネルは無視
 				if c.Topic == "" {
 					continue
 				}
+				options := make(map[string]string)
+				// Prefixがあった場合はそれに続くオプション通り、なかった場合はデフォルト動作する
+				lastline := getLastLine(c.Topic)
+				topic = c.Topic
+				log.Printf("lastline: %v", strings.HasPrefix(prefix, lastline))
+				if strings.HasPrefix(prefix, lastline) {
+					// prefixがある場合最終行を除外
+					topic = strings.Join(strings.SplitAfterN(c.Topic, "\n", -1), "\n")
+					args := strings.Split(strings.TrimPrefix(prefix, lastline), ",")
+					if len(args) < 4 {
+						continue
+					}
+					for _, arg := range args {
+						log.Printf("arg: %v", arg)
+						options[strings.Split(arg, "=")[0]] = strings.Split(arg, "=")[1]
+					}
+				}
+				if options["enable"] == "false" {
+					log.Printf("enable=false")
+					continue
+				}
+				foreach, err := strconv.Atoi(options["foreach"])
+				if err != nil || foreach > 101 {
+					foreach = 100
+				}
+				if options["enableinthreads"] == "false" {
+					if c.Type == discordgo.ChannelTypeGuildPrivateThread || c.Type == discordgo.ChannelTypeGuildPublicThread {
+						continue
+					}
+				}
 				// メッセージ100件取得
-				messages, err := discord.ChannelMessages(c.ID, 100, "", "", "")
+				messages, err := discord.ChannelMessages(c.ID, foreach, "", "", "")
 				if err != nil {
 					log.Printf("Error getting ChannelMessages: %s", err)
 					break
 				}
-				// 100メッセージ取得してBotのメッセージがなかったらトピックを送信(100メッセージごとに送信)
+				// メッセージ取得してBotのメッセージがなかったらトピックを送信(foreachメッセージごとに送信)
 				for i, m := range messages {
 					log.Printf("%v,m.Author.ID: %v == %v", i, m.Author.ID, discord.State.User.ID)
+					// 非送信チャンネルの場合はその場で切り上げ
 					if m.Author.ID == discord.State.User.ID {
-						log.Printf("true")
 						break
 					}
+					// 送信対象を追加
 					if i == len(messages)-1 {
-						log.Printf("false")
-						sendChannels = append(sendChannels, c)
+						discord.ChannelMessageSend(c.ID, message+topic)
+						log.Printf("channel: %v send: %v", c.Name, message+topic)
 					}
 				}
 			}
-			//メッセージ送出
-			log.Printf("sendChannels: %v", sendChannels)
-			for _, c := range sendChannels {
-				discord.ChannelMessageSend(c.ID, "【定期広報】チャンネル内ルール :\n"+c.Topic)
-				// 通知爆弾にならないよう10分間隔で送信
-				time.Sleep(10 * time.Minute)
-			}
 		}
 	}
+}
+
+func getLastLine(str string) string {
+	log.Printf("str: %v", str)
+	log.Printf(strings.Split(str, "\n")[len(strings.Split(str, "\n"))-1])
+	return strings.Split(str, "\n")[len(strings.Split(str, "\n"))-1]
 }

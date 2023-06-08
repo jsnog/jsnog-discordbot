@@ -10,6 +10,11 @@ import (
 var (
 	token *string = flag.String("token", "", "Bot Token")
 	guild *string = flag.String("guild", "", "Guild ID")
+	debug *bool   = flag.Bool("debug", false, "debug mode")
+)
+
+const (
+	message = "【定期広報】チャンネル内ルール :\n"
 )
 
 func main() {
@@ -34,6 +39,4 @@ func main() {
 	// トピック送信関数
 	go announceTopic(d, *guild)
 	wg.Wait()
-
-	defer d.Close()
 }
