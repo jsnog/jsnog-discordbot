@@ -2,8 +2,21 @@
 JSNOG(Japan Student Network Operators Group)のDiscordコミュニティ用Botです
 
 #### 現時点での実装済み機能
-- チャンネルのトピックを定期的にチャンネル内で広報
+
+- チャンネルのトピックを定期的にチャンネル内/その下のスレッドで広報
   - チャンネルをバッチ処理的に確認し、前の広報が流れてしまったときにもう一度広報します
+  - トピックの最終行に!jsnog-botプレフィックスを付けた後にオプションを記載することで動作のカスタマイズが可能に
+    - !jsnog-bot enable={true/false} enableinthreads={true/false} foreach={n}
+      - enable: トピックアナウンス機能の有効/無効
+      - enableinthreads: チャンネル下に追加されたスレッドでもトピックアナウンスの有効/無効
+      - foreach: 何メッセージ毎にアナウンスするか(1~100)
+
+### 引数
+```
+-token : DiscordAPIのトークン
+-guild : 動作させるDiscordギルド(サーバ)ID
+-debug : デバック機能(10s毎に作動)
+```
 
 #### コントリビュート
 PR Issue(Typoとかでも)大歓迎です！
