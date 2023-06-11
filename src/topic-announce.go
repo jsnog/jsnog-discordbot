@@ -4,98 +4,127 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-const (
-	prefix = "!jsnog-bot"
-)
+// channel
+type channel struct {
+	channel *discordgo.Channel
+	// enableInThreadsがfalseの場合Threadsは定義しないこと
+	threads         []*discordgo.Channel
+	topic           string
+	enableInThreads bool
+	foreach         int
+}
 
-func announceTopic(discord *discordgo.Session, guild string) {
-	// 1時間
-	var t time.Duration
-	if *debug == true {
-		t = 10 * time.Second
-	} else {
-		t = 1 * time.Hour
+func SendTopic(d *discordgo.Session, guild string) error {
+	// channels
+	chs, err := d.GuildChannels(guild)
+	if err != nil {
+		return err
 	}
-	timer := time.NewTicker(t)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			//Every 2 hour
-			log.Print("announceTopic")
-			channels, err := discord.GuildChannels(guild)
-			if err != nil {
-				log.Printf("Error getting GuildChannels: %s", err)
+	// ActiveThreads
+	actiThs, err := d.GuildThreadsActive(guild)
+	if err != nil {
+		return err
+	}
+	sendchs, err := seekchannels(chs, actiThs)
+	if err != nil {
+		return err
+	}
+
+	// 送信関数(c:channel, t:topic, fe:foreach)
+	send := func(c *discordgo.Channel, t string, fe int) {
+		msgs, err := d.ChannelMessages(c.ID, fe, "", "", "")
+		if err != nil {
+			log.Printf("Error getting ChannelMessages: %s", err)
+		}
+		for i, m := range msgs {
+			if m.Author.ID == d.State.User.ID {
 				break
 			}
-			// 全チャンネルのトピックを取得
-			var topic string
-			for _, c := range channels {
-				// トピックがないチャンネルは無視
-				if c.Topic == "" {
-					continue
-				}
-				options := make(map[string]string)
-				// Prefixがあった場合はそれに続くオプション通り、なかった場合はデフォルト動作する
-				lastline := getLastLine(c.Topic)
-				topic = c.Topic
-				log.Printf("lastline: %v", strings.HasPrefix(prefix, lastline))
-				if strings.HasPrefix(prefix, lastline) {
-					// prefixがある場合最終行を除外
-					topic = strings.Join(strings.SplitAfterN(c.Topic, "\n", -1), "\n")
-					args := strings.Split(strings.TrimPrefix(prefix, lastline), ",")
-					if len(args) < 4 {
-						continue
-					}
-					for _, arg := range args {
-						log.Printf("arg: %v", arg)
-						options[strings.Split(arg, "=")[0]] = strings.Split(arg, "=")[1]
-					}
-				}
-				if options["enable"] == "false" {
-					log.Printf("enable=false")
-					continue
-				}
-				foreach, err := strconv.Atoi(options["foreach"])
-				if err != nil || foreach > 101 {
-					foreach = 100
-				}
-				if options["enableinthreads"] == "false" {
-					if c.Type == discordgo.ChannelTypeGuildPrivateThread || c.Type == discordgo.ChannelTypeGuildPublicThread {
-						continue
-					}
-				}
-				// メッセージ100件取得
-				messages, err := discord.ChannelMessages(c.ID, foreach, "", "", "")
+			if i == len(msgs)-1 {
+				_, err := d.ChannelMessageSend(c.ID, message+t)
 				if err != nil {
-					log.Printf("Error getting ChannelMessages: %s", err)
-					break
-				}
-				// メッセージ取得してBotのメッセージがなかったらトピックを送信(foreachメッセージごとに送信)
-				for i, m := range messages {
-					log.Printf("%v,m.Author.ID: %v == %v", i, m.Author.ID, discord.State.User.ID)
-					// 非送信チャンネルの場合はその場で切り上げ
-					if m.Author.ID == discord.State.User.ID {
-						break
-					}
-					// 送信対象を追加
-					if i == len(messages)-1 {
-						discord.ChannelMessageSend(c.ID, message+topic)
-						log.Printf("channel: %v send: %v", c.Name, message+topic)
-					}
+					log.Printf("Error sending message: %s", err)
 				}
 			}
 		}
 	}
+	for _, c := range sendchs {
+		// 通常チャンネルへの送信
+		send(c.channel, c.topic, c.foreach)
+		// チャンネル内スレッドへの送信
+		if c.enableInThreads {
+			for _, t := range c.threads {
+				send(t, c.topic, c.foreach)
+			}
+		}
+	}
+	return nil
 }
 
-func getLastLine(str string) string {
-	log.Printf("str: %v", str)
-	log.Printf(strings.Split(str, "\n")[len(strings.Split(str, "\n"))-1])
-	return strings.Split(str, "\n")[len(strings.Split(str, "\n"))-1]
+func seekchannels(dChs []*discordgo.Channel, dActiThs *discordgo.ThreadsList) ([]channel, error) {
+	// channelにスレッドが紐づいていないため手動で紐づけ!
+	threads := make(map[string][]*discordgo.Channel)
+	for _, t := range dActiThs.Threads {
+		threads[t.ParentID] = append(threads[t.ParentID], t)
+	}
+	// channels
+	chs := make([]channel, 0)
+dchsLoop:
+	for _, c := range dChs {
+		// トピックがないチャンネルは無視
+		if c.Topic != "" {
+			t := strings.Split(c.Topic, "\n")
+			lastline := t[len(t)-1]
+			ch := channel{}
+			// デフォルト設定
+			ch.channel = c
+			ch.topic = c.Topic
+			ch.enableInThreads = false
+			ch.foreach = 100
+
+			// prefixの有無
+			if !strings.HasPrefix(lastline, prefix) {
+				chs = append(chs, ch)
+			} else {
+				// Prefixがあった場合
+				args := strings.Split(strings.TrimPrefix(lastline, prefix), " ")
+				for _, arg := range args {
+					opt := strings.Split(arg, "=")
+					switch opt[0] {
+					// トピックアナウンスの有効/無効
+					case "enable":
+						if opt[1] == "false" {
+							continue dchsLoop
+						}
+					// チャンネル内スレッドのトピックアナウンスの有効/無効
+					case "enableinthreads":
+						if opt[1] == "true" {
+							ch.enableInThreads = true
+						} else {
+							ch.enableInThreads = false
+						}
+					// どれだけの頻度でトピックをアナウンスするか
+					case "foreach":
+						foreach, err := strconv.Atoi(opt[1])
+						if err != nil || foreach > 101 || foreach < 1 {
+							ch.foreach = 100
+						} else {
+							ch.foreach = foreach
+						}
+					}
+				}
+				ch.topic = strings.Join(t[:len(t)-1], "\n")
+				if ch.enableInThreads {
+					// スレッドを紐づける
+					ch.threads = threads[c.ID]
+				}
+				chs = append(chs, ch)
+			}
+		}
+	}
+	return chs, nil
 }
